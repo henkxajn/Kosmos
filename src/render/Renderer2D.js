@@ -2,6 +2,8 @@ import { AU } from "../sim/WorldGen.js";
 import { lerpVec3 } from "./math.js";
 import { buildOrbitPoints } from "./orbits.js";
 
+const TYPE_PRIORITY = { star: 0, planet: 1, moon: 2 };
+
 export class Renderer2D {
   constructor(canvas, camera) {
     this.canvas = canvas;
@@ -10,14 +12,20 @@ export class Renderer2D {
 
     this.auPixels = 280;
     this.orbitCache = new Map();
-    this.pickRadiusPx = 10;
 
+    this.pickRadiusPx = 10;
     this._lastScreenBodies = null;
     this.onPick = null;
 
     this._stars = this._makeStars(160);
+    this._selectedId = null;
+
     this._installPick();
   }
+
+  setSelectedId(id) { this._selectedId = id || null; }
+
+  pxPerMeter() { return (this.auPixels / AU) * this.camera.zoom; }
 
   _makeStars(n) {
     const stars = [];
@@ -32,9 +40,7 @@ export class Renderer2D {
   setOrbitCacheFromSnapshot(snapshot) {
     for (const b of snapshot.bodies) {
       if (!b.orbit) continue;
-      if (!this.orbitCache.has(b.id)) {
-        this.orbitCache.set(b.id, buildOrbitPoints(b.orbit, 260));
-      }
+      if (!this.orbitCache.has(b.id)) this.orbitCache.set(b.id, buildOrbitPoints(b.orbit, 260));
     }
   }
 
@@ -56,14 +62,23 @@ export class Renderer2D {
       const mx = e.clientX * dpr;
       const my = e.clientY * dpr;
 
-      let best = null;
-      let bestD2 = Infinity;
+      const candidates = [];
       for (const sb of this._lastScreenBodies) {
         const dx = mx - sb.sx, dy = my - sb.sy;
         const d2 = dx*dx + dy*dy;
         const r = Math.max(sb.rPx, this.pickRadiusPx * dpr);
-        if (d2 <= r*r && d2 < bestD2) { bestD2 = d2; best = sb.id; }
+        if (d2 <= r*r) candidates.push({ ...sb, d2 });
       }
+      if (!candidates.length) return;
+
+      candidates.sort((a, b) => {
+        const pa = TYPE_PRIORITY[a.type] ?? 99;
+        const pb = TYPE_PRIORITY[b.type] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return a.d2 - b.d2;
+      });
+
+      const best = candidates[0].id;
       if (best && this.onPick) this.onPick(best);
     });
   }
@@ -80,8 +95,8 @@ export class Renderer2D {
     if (this.camera.followId) {
       const fb = byId.get(this.camera.followId);
       if (fb) {
-        const pxPerMeter = (this.auPixels / AU) * this.camera.zoom;
-        this.camera.setOffsetToCenterWorld({ x: fb.position.x * pxPerMeter, y: fb.position.y * pxPerMeter });
+        const ppm = this.pxPerMeter();
+        this.camera.setOffsetToCenterWorld({ x: fb.position.x * ppm, y: fb.position.y * ppm });
       }
     }
 
@@ -108,8 +123,8 @@ export class Renderer2D {
   }
 
   _worldToScreenXY(xMeters, yMeters) {
-    const pxPerMeter = (this.auPixels / AU) * this.camera.zoom;
-    return { x: xMeters * pxPerMeter + this.camera.offsetX, y: yMeters * pxPerMeter + this.camera.offsetY };
+    const ppm = this.pxPerMeter();
+    return { x: xMeters * ppm + this.camera.offsetX, y: yMeters * ppm + this.camera.offsetY };
   }
 
   _drawOrbits(ctx, snapshot, byId) {
@@ -118,10 +133,14 @@ export class Renderer2D {
     ctx.lineWidth = Math.max(1, 1.15 * dpr);
     ctx.strokeStyle = "rgba(220, 226, 255, 0.16)";
 
+    const zoom = this.camera.zoom;
+
     for (const b of snapshot.bodies) {
       if (!b.orbit) continue;
       const parent = byId.get(b.orbit.parentId);
       if (!parent) continue;
+
+      if (b.type === "moon" && zoom < 0.35 && b.id !== this._selectedId) continue;
 
       const localPts = this.orbitCache.get(b.id);
       if (!localPts || localPts.length < 2) continue;
@@ -140,16 +159,17 @@ export class Renderer2D {
 
   _drawBodies(ctx, snapshot) {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const bodies = snapshot.bodies.slice().sort((a, b) => (a.type === "star") - (b.type === "star"));
+    const zoom = this.camera.zoom;
 
+    const bodies = snapshot.bodies.slice().sort((a, b) => (a.type === "star") - (b.type === "star"));
     this._lastScreenBodies = [];
 
     for (const b of bodies) {
       const scr = this._worldToScreenXY(b.position.x, b.position.y);
 
       const radiusAU = b.radius / AU;
-      let rPx = Math.max(2.5 * dpr, Math.sqrt(radiusAU) * 85 * this.camera.zoom * dpr);
-      if (b.type === "star") rPx = Math.max(10 * dpr, 30 * this.camera.zoom * dpr);
+      let rPx = Math.max(3.2 * dpr, Math.sqrt(Math.max(1e-12, radiusAU)) * 90 * zoom * dpr);
+      if (b.type === "star") rPx = Math.max(12 * dpr, 34 * zoom * dpr);
 
       const fill = b.type === "star"
         ? "rgba(255, 236, 200, 0.92)"
@@ -173,10 +193,25 @@ export class Renderer2D {
       this.ctx.strokeStyle = "rgba(255,255,255,0.12)";
       this.ctx.lineWidth = 1 * dpr;
       this.ctx.stroke();
+
+      if (b.id === this._selectedId) {
+        this.ctx.strokeStyle = "rgba(255,255,255,0.35)";
+        this.ctx.lineWidth = 2 * dpr;
+        this.ctx.beginPath();
+        this.ctx.arc(scr.x, scr.y, rPx + 4*dpr, 0, Math.PI*2);
+        this.ctx.stroke();
+      }
+
       this.ctx.restore();
 
       const isFollow = this.camera.followId === b.id;
-      if (b.type === "star" || isFollow) {
+      const showMoonLabel = (zoom >= 0.55) || (b.id === this._selectedId) || isFollow;
+      const showLabel =
+        (b.type === "star") ||
+        (b.type === "planet") ||
+        (b.type === "moon" && showMoonLabel);
+
+      if (showLabel) {
         this.ctx.save();
         this.ctx.fillStyle = "rgba(240, 243, 255, 0.92)";
         this.ctx.font = `${12 * dpr}px system-ui`;
@@ -184,7 +219,7 @@ export class Renderer2D {
         this.ctx.restore();
       }
 
-      this._lastScreenBodies.push({ id: b.id, sx: scr.x, sy: scr.y, rPx });
+      this._lastScreenBodies.push({ id: b.id, type: b.type, sx: scr.x, sy: scr.y, rPx });
     }
   }
 

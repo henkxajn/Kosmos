@@ -49,6 +49,8 @@ export class Camera2D {
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       this.offsetX += dx * dpr;
       this.offsetY += dy * dpr;
+
+      // pan breaks follow
       this.followId = null;
     });
 
@@ -59,8 +61,9 @@ export class Camera2D {
       const my = e.clientY * dpr;
 
       const zoomFactor = Math.exp(-e.deltaY * 0.0012);
-      const newZoom = Math.max(0.02, Math.min(3.0, this.zoom * zoomFactor));
+      const newZoom = Math.max(0.02, Math.min(12.0, this.zoom * zoomFactor));
 
+      // zoom around cursor
       const k = newZoom / this.zoom;
       this.offsetX = mx - (mx - this.offsetX) * k;
       this.offsetY = my - (my - this.offsetY) * k;
@@ -74,6 +77,11 @@ export class Camera2D {
   setOffsetToCenterWorld(baseNoOffset) {
     this.offsetX = this.canvas.width / 2 - baseNoOffset.x;
     this.offsetY = this.canvas.height / 2 - baseNoOffset.y;
+  }
+
+  centerOnWorld(worldX, worldY, pxPerMeter) {
+    this.offsetX = this.canvas.width / 2 - worldX * pxPerMeter;
+    this.offsetY = this.canvas.height / 2 - worldY * pxPerMeter;
   }
 
   reset() {

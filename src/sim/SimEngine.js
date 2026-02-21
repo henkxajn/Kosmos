@@ -25,8 +25,13 @@ export class SimEngine {
       bodies: this.world.bodyOrder.map((id) => {
         const b = this.world.bodies[id];
         return {
-          id: b.id, name: b.name, type: b.type, mass: b.mass, radius: b.radius,
-          position: { ...b.position }, periodSeconds: b.periodSeconds,
+          id: b.id,
+          name: b.name,
+          type: b.type,
+          mass: b.mass,
+          radius: b.radius,
+          position: { ...b.position },
+          periodSeconds: b.periodSeconds,
           orbit: b.orbit ? { ...b.orbit } : undefined
         };
       })

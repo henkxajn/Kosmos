@@ -32,7 +32,7 @@ self.onmessage = (ev) => {
     running = true;
     last = performance.now();
     post({ type: "READY" });
-    post({ type: "LOG", message: `Initialized with seed=\"${msg.seed}\"` });
+    post({ type: "LOG", message: `Initialized with seed="${msg.seed}"` });
     loop();
     return;
   }
