@@ -17,7 +17,7 @@ Cel warstwy 4X (oryginalna wizja gracza):
 - **Canvas 2D** (natywny) — warstwa UI (UIManager) i mapa planety (PlanetScene)
 - JavaScript ES Modules (natywne, bez bundlera)
 - **Brak Node.js** — otwierać przez Live Server w VS Code
-- Zapis: localStorage (klucz `kosmos_save_v1`), wersja save: v4
+- Zapis: localStorage (klucz `kosmos_save_v1`), wersja save: v5
 
 ### Architektura renderingu (3D + 2D overlay)
 ```
@@ -36,8 +36,11 @@ index.html
 - `physics:updated { planets, star, moons }` → `_syncPlanetMeshes()` — synchronizuje pozycje
 
 **ThreeCameraController** (`src/renderer/ThreeCameraController.js`):
-- Sferyczny orbit: LPM drag = obrót, scroll = zoom (10–450 j.), H = reset
+- Sferyczny orbit: LPM drag = obrót, scroll = zoom (3–450 j., 0.5 przy focus na księżycu), H = reset
 - `wasDrag` — flaga odróżniająca drag od kliknięcia
+- `_minDist` — dynamiczny min zoom: 3 (domyślny), 0.5 (focus na księżycu)
+- `setMinDist(val)` — wywoływany przez ThreeRenderer przy body:selected/deselected
+- Adaptacyjna czułość scrolla: dist<5→0.01, dist<20→0.02, else→0.05
 
 ---
 
@@ -139,6 +142,12 @@ PlanetScene
   └─ nasłuchuje: resource:changed, planet:buildResult, planet:demolishResult, tech:researched
   └─ emituje:   planet:buildRequest, planet:demolishRequest, tech:researchRequest
 
+DistanceUtils (src/utils/DistanceUtils.js)
+  └─ euclideanAU(a, b)          ← dynamiczna odległość z physics.x/y → AU
+  └─ orbitalAU(a, b)            ← stabilna |a.orbital.a - b.orbital.a| → AU
+  └─ fromHomePlanetAU(entity)   ← skrót euclidean od homePlanet
+  └─ orbitalFromHomeAU(entity)  ← skrót orbital od homePlanet (zasięg statków)
+
 SaveSystem._serializeCiv4x()
   └─ czyta: window.KOSMOS.{resourceSystem, civSystem, buildingSystem, techSystem, expeditionSystem}
   └─ zapisuje: resources, civ, buildings (z baseRates + popCost!), techs, expeditions
@@ -185,7 +194,8 @@ SaveSystem._serializeCiv4x()
 4. NIE importuj systemów bezpośrednio między sobą
 5. Dane gry (budynki, tech, składy chemiczne) → `src/data/` — oddzielone od logiki
 6. Nowy budynek tier-2: dodaj `requires: 'tech_id'` w BuildingsData + odpowiednie `unlockBuilding` w TechData
-7. Nowy statek: dodaj definicję w `ShipsData.js` + `unlockShip` w TechData + budowa przez Stocznię (ColonyManager.startShipBuild)
+7. Nowy statek: dodaj definicję w `ShipsData.js` (z `range` w AU) + `unlockShip` w TechData + budowa przez Stocznię (ColonyManager.startShipBuild)
+8. Odległość między ciałami → `DistanceUtils` (`src/utils/DistanceUtils.js`): euclidean (dynamiczna) i orbital (stabilna)
 
 ---
 
@@ -223,10 +233,14 @@ SaveSystem._serializeCiv4x()
 - [x] **Etap 18** — System POP: dyskretna populacja (start: 2 POPy), budynki wymagają 0.25–0.5 POP, konsumpcja 4 surowców per POP, wzrost akumulatorowy, głód, employmentPenalty, ekspedycje blokują 0.5 POP, SaveSystem v4
 - [x] **Etap 19** — CivPanel UI: 3 zakładki (Gospodarka/Technologie/Budowle) w UIManager z widoku kosmicznego, floating tooltips hover na budynkach i technologiach, EventLog przeniesiony na dół-lewo
 
-### Następne etapy (plan)
-- [ ] **Etap 14** — Kolonizacja: colony_pod → osada na innym ciele → druga PlanetScene
+- [x] **Etap 14** — Kolonizacja: colony_ship, scientific expedition, ColonyManager, multi-kolonia
 - [x] **Etap 15** — Zdarzenia losowe: RandomEventSystem (tymczasowo wstrzymany, flaga disabled=true)
-- [ ] **Etap 16** — Ekspansja między planetami: handel, migracja, zarządzanie imperium
+- [x] **Etap 16** — Ekspansja między planetami: handel, migracja, zarządzanie imperium
+- [x] **Etap 23** — Stocznia + Flota: statki jako jednostki, shipyard, hangar per-kolonia
+- [x] **Etap 24** — Misje rozpoznawcze: recon w ExpeditionSystem, explored gating
+- [x] **Etap 25** — System odległości + zoom: DistanceUtils (euclidean/orbital AU), range statków, dynamiczny min-zoom dla księżyców
+
+### Następne etapy (plan)
 - [ ] **Etap 17** — Cel gry: warunki zwycięstwa / milestones cywilizacyjne
 
 ---
@@ -251,3 +265,6 @@ SaveSystem._serializeCiv4x()
 | Konsumpcja per POP (4 surowce) | organics: 3.0, water: 1.5, energy: 1.0, minerals: 0.5 per POP/rok — emergentne napięcie zasobowe |
 | Statki jako jednostki floty (nie budynki) | Stocznia buduje statki → trafiają do hangaru kolonii; intuicyjniejsze niż budynki na hexach |
 | RandomEventSystem disabled | System wstrzymany (flaga disabled=true) do czasu dopracowania logiki zdarzeń |
+| Dwie metryki odległości (euclidean/orbital) | Euclidean = dynamiczna (UI, travel time), orbital = stabilna (gating zasięgu statków) |
+| range w ShipsData (AU) | science_vessel=20 AU, colony_ship=12 AU — wymusza stopniową ekspansję |
+| Dynamiczny min-zoom dla księżyców | Moon r=0.015–0.04 → minDist=0.5 przy focus (vs 3 domyślnie) |
